@@ -56,7 +56,7 @@ mod parse;
 
 /// Parses the contents of a SVD file (XML)
 pub fn parse(xml: &str) -> Result<Device> {
-    Device::parse(xml).chain_err(|| "Failed to parse")
+    Device::parse(xml).chain_err(|| "Failed to parse svd file")
 }
 
 trait ElementExt {
@@ -81,7 +81,7 @@ impl ElementExt for Element {
         elem.ok_or(format!("Failed to get {:?}", k).into())
     }
     fn debug(&self) {
-        println!("<{}>", self.name);
+        println!("<{} {:?}>", self.name, self.attributes);
         for c in &self.children {
             println!("{}: {:?}", c.name, c.text)
         }
@@ -112,13 +112,13 @@ impl Device {
                 tree.get_child("peripherals").map(|rs| rs.children.iter().map(Peripheral::parse)),
                 "Failed to get peripherals");
         let mut peripherals = vec![];
-        for peripheral_res in peripherals_inter {
-            peripherals.push(peripheral_res?);
+        for (i, peripheral_res) in peripherals_inter.enumerate() {
+            peripherals.push(peripheral_res.chain_err(|| format!("Failed to parse peripheral #{}", i+1))?);
         }
         Ok(Device {
-            name: bail_if_none!(tree.get_child_text_try("name")?, "Failed to get name"),
+            name: bail_if_none!(tree.get_child_text_try("name")?, "Failed to get name of device"),
             peripherals: peripherals, 
-            defaults: Defaults::parse(tree)?,
+            defaults: Defaults::parse(tree).chain_err(|| "Failed to parse defaults")?,
             _extensible: (),
         })
     }
@@ -143,11 +143,12 @@ impl Peripheral {
         if tree.name != "peripheral" {
             bail!("peripheral not peripheral")
         }
+        let name = bail_if_none!(tree.get_child_text_try("name")?, "Couldn't get name");
         let mut registers_inter = tree.get_child("registers").map(|rs| rs.children.iter().map(Register::parse));
         let mut registers = Some(vec![]);
         if registers_inter.is_some() {
             for register_res in registers_inter.as_mut().unwrap() {
-                if let Some(register) = register_res? {
+                if let Some(register) = register_res.chain_err(|| format!("Inside peripheral `{}`", name))? {
                     registers.as_mut().unwrap().push(register);
                 }
             }
@@ -155,7 +156,7 @@ impl Peripheral {
             registers = None;
         };
         Ok(Peripheral {
-            name: bail_if_none!(tree.get_child_text_try("name")?, "Couldn't get name"),
+            name: name,
             group_name: tree.get_child_text_try("groupName")?,
             description: tree.get_child_text_try("description")?,
             base_address: parse::u32(tree.get_child_try("baseAddress").chain_err(|| "Couldn't get baseAddress")?).chain_err(|| "Couldn't parse baseAddress")?,
