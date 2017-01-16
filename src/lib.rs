@@ -29,7 +29,7 @@ extern crate xmltree;
 #[macro_use]
 extern crate error_chain;
 
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::fmt::Debug;
 
 pub mod errors;
@@ -190,10 +190,11 @@ pub struct Interrupt {
 
 impl Interrupt {
     fn parse(tree: &Element) -> Result<Interrupt> {
+        let name = bail_if_none!(tree.get_child_text_try("name")?, "Couldn't find name of `interrupt`");
         Ok(Interrupt {
-            name: bail_if_none!(tree.get_child_text_try("name")?, "Couldn't get name"),
+            name: name.clone(),
             description: tree.get_child_text_try("description")?,
-            value: parse::u32(tree.get_child_try("value").chain_err(|| "Couldn't get value")?)?,
+            value: parse::u32(tree.get_child_try("value").chain_err(|| format!("Couldn't get value of interrupt: `{}`", name))?)?,
         })
     }
 }
@@ -210,6 +211,7 @@ pub struct RegisterInfo {
     /// `None` indicates that the `<fields>` node is not present
     pub fields: Option<Vec<Field>>,
     // Reserve the right to add more fields to this struct
+    pub derived_from: Option<String>,
     _extensible: (),
 }
 
@@ -237,6 +239,15 @@ impl Deref for Register {
     }
 }
 
+impl DerefMut for Register {
+    fn deref_mut(&mut self) -> &mut RegisterInfo {
+        match *self {
+            Register::Single(ref mut info) => info,
+            Register::Array(ref mut info, _) => info
+        }
+    }
+}
+
 impl RegisterInfo {
     fn parse(tree: &Element) -> Result<RegisterInfo> {
         let name = bail_if_none!(tree.get_child_text_try("name")?, "Couldn't get name of register.");
@@ -249,16 +260,26 @@ impl RegisterInfo {
         } else {
             fields = None;
         };
-        tree.debug();
+        let derived_from;
+        let additional_info = if let Some(derived) = tree.attributes.get("derivedFrom".into()) {
+            derived_from = Some(derived.clone());
+            format!(" Derived from {}", derived.clone())
+        } else {
+            derived_from = None;
+            "".into()
+        };
+        //tree.debug();
         Ok(RegisterInfo {
             name: name.clone(), 
-            description: bail_if_none!(tree.get_child_text_try("description")?, "Couldn't get `description` tag of register: `{}`", name),
+            //description: bail_if_none!(tree.get_child_text_try("description")?, "Couldn't get `description` tag of register: `{}`", name),
+            description: tree.get_child_text_try("description")?.unwrap_or(format!("{} register.{}", name, additional_info)),
             address_offset: parse::u32(tree.get_child_try("addressOffset").chain_err(|| format!("Couldn't get `addressOffset` of register: `{}`", name))?)?,
             size: tree.get_child("size").map_or(Ok(None), |t| parse::u32(t).map(|i| Some(i)).chain_err(|| format!("Couldn't parse tag `size` of register: `{}`", name)))?,
             access: tree.get_child("access").map_or(Ok(None), |access| Access::parse(access).map(|ac| Some(ac)).chain_err(|| format!("Couldn't parse tag `access` of register: `{}`", name)))?,
             reset_value: tree.get_child("resetValue").map_or(Ok(None), |t| parse::u32(t).map(|i| Some(i)).chain_err(|| format!("Couldn't parse tag `resetValue` of register: `{}`", name)))?,
             reset_mask: tree.get_child("resetMask").map_or(Ok(None), |t| parse::u32(t).map(|i| Some(i)).chain_err(|| format!("Couldn't parse tag `resetMask` of register: `{}`", name)))?,
             fields: fields,
+            derived_from: derived_from, 
             _extensible: (),
         })
     }
@@ -267,7 +288,7 @@ impl RegisterInfo {
 impl RegisterArrayInfo {
     fn parse(tree: &Element) -> Result<RegisterArrayInfo> {
         Ok(RegisterArrayInfo {
-            dim: bail_if_none!(tree.get_child_text_try("dim")?, "Failed to get dim").parse::<u32>().chain_err(|| "Couldn't parse dim")?,
+            dim: bail_if_none!(tree.get_child_text_try("dim")?, "Failed to get number of elements in dim").parse::<u32>().chain_err(|| "Couldn't parse dim")?,
             dim_increment: bail_if_none!(tree.get_child("dimIncrement").map_or(Ok(None), |t| parse::u32(t).map(|di| Some(di)).chain_err(|| "Couldn't parse dimIncrement"))?, "Couldn't get dimIncrement"),
             dim_index: tree.get_child("dimIndex").map_or(
                 Ok(None),

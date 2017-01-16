@@ -8,4 +8,10 @@ error_chain! {
         NumParseIntError(num::ParseIntError);
 
     }
+    errors {
+        MissingMandatory(t: String) {
+            description("mandatory element missing")
+            display("mandatory element missing: ´{}´", t)
+        }
+    }
 }
