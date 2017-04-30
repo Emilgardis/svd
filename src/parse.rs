@@ -3,7 +3,7 @@ use xmltree::Element;
 use errors::*;
 
 pub fn u32(tree: &Element) -> Result<u32> {
-    let text = bail_if_none!(tree.text.as_ref(), "Couldn't get `Element`"); // TODO: Fix error message
+    let text = bail_if_none!(tree.text.as_ref(), "Field is empty"); // TODO: Fix error message
 
     if text.starts_with("0x") || text.starts_with("0X") {
         u32::from_str_radix(&text["0x".len()..], 16).chain_err(|| "Couldn't parse hex")
