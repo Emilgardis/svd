@@ -255,7 +255,7 @@ impl Interrupt {
 #[derive(Clone, Debug)]
 pub struct RegisterInfo {
     pub name: String,
-    pub description: String,
+    pub description: Option<String>,
     pub address_offset: u32,
     pub size: Option<u32>,
     pub access: Option<Access>,
@@ -264,6 +264,7 @@ pub struct RegisterInfo {
     /// `None` indicates that the `<fields>` node is not present
     pub fields: Option<Vec<Field>>,
     pub write_constraint: Option<WriteConstraint>,
+    pub derived_from: Option<String>,
     // Reserve the right to add more fields to this struct
     _extensible: (),
 }
@@ -331,10 +332,14 @@ impl RegisterInfo {
         } else {
             fields = None;
         };
+        let derived_from = tree.attributes.get("derivedFrom".into());
         Ok(RegisterInfo {
             name: name.clone(), 
-            description: bail_if_none!(tree.get_child_text_try("description")?,
-                "While getting ´description´ of register `{}`", name),
+            description: if derived_from.is_none() {
+                        tree.get_child_text_try("description").chain_err(|| format!("Couldn't get `addressOffset` of register: `{}`", name))?
+                    } else {
+                        None
+                    },
             address_offset: parse::u32(tree.get_child_try("addressOffset").chain_err(|| format!("Couldn't get `addressOffset` of register: `{}`", name))?)?,
             size: tree.get_child("size").map_or(Ok(None), |t| parse::u32(t).map(|i| Some(i)).chain_err(|| format!("Couldn't parse tag `size` of register: `{}`", name)))?,
             access: tree.get_child("access").map_or(Ok(None), |access| Access::parse(access).map(|ac| Some(ac)).chain_err(|| format!("Couldn't parse tag `access` of register: `{}`", name)))?,
@@ -349,6 +354,7 @@ impl RegisterInfo {
                                 .chain_err(|| "Couldn't parse writeConstraint")
                         }
                     )?,
+			derived_from: derived_from.cloned(),
             _extensible: (),
         })
     }
