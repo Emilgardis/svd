@@ -162,7 +162,7 @@ impl Peripheral {
             check_dimable_name(name, "derivedFrom")?;
         } else if let Some(registers) = self.registers.as_ref() {
             if registers.is_empty() {
-                #[cfg(feature="strict")]
+                #[cfg(feature = "strict")]
                 return Err(SVDError::EmptyRegisters)?;
             }
         }
