@@ -45,6 +45,7 @@ impl Parse for WriteConstraint {
                 _ => Err(SVDError::UnknownWriteConstraint(tree.clone()).into()),
             }
         } else {
+            //#[cfg(feature="strict")]
             Err(SVDError::MoreThanOneWriteConstraint(tree.clone()).into())
         }
     }

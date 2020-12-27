@@ -1,7 +1,9 @@
+
 use std::collections::HashMap;
 
 use crate::elementext::ElementExt;
 use xmltree::Element;
+
 
 use crate::encode::Encode;
 use crate::error::*;
@@ -191,6 +193,7 @@ impl RegisterInfo {
             check_derived_name(name, "derivedFrom")?;
         } else if let Some(fields) = self.fields.as_ref() {
             if fields.is_empty() {
+                #[cfg(feature="strict")]
                 return Err(SVDError::EmptyFields)?;
             }
         }
@@ -241,6 +244,7 @@ impl RegisterInfo {
             .build()
     }
 }
+
 
 impl Encode for RegisterInfo {
     type Error = anyhow::Error;
@@ -330,6 +334,7 @@ impl Encode for RegisterInfo {
 }
 
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::run_test;
