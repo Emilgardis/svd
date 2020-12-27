@@ -92,7 +92,11 @@ pub(crate) fn check_name(name: &str, tag: &str) -> Result<()> {
     if PATTERN.is_match(name) {
         Ok(())
     } else {
-        Err(NameError::Invalid(name.to_string(), tag.to_string()).into())
+        if cfg!(feature = "strict") {
+            Err(NameError::Invalid(name.to_string(), tag.to_string()).into())
+        } else {
+            Ok(())
+        }
     }
 }
 
