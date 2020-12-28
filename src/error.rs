@@ -5,7 +5,66 @@ pub use anyhow::{Context, Result};
 use core::u64;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::result::Result as StdResult;
 use xmltree::Element;
+
+pub trait ExtResult<T> {
+    fn into_result(self) -> StdResult<T, anyhow::Error>;
+    fn ignore_error(self) -> StdResult<T, anyhow::Error>;
+    fn is_warn_ok(&self) -> bool;
+    fn is_warning_or_error(&self) -> bool;
+    fn with_warning_context<C, F>(self, f: F) -> Result<(T, Warning), anyhow::Error>
+    where
+        C: std::fmt::Display + Send + Sync + 'static,
+        F: FnOnce() -> C;
+}
+
+pub type Warning = Result<()>;
+impl<T> ExtResult<T> for Result<(T, Warning), anyhow::Error> {
+    /// Collect Warnresult Result into a Result, always handling the error
+    fn into_result(self) -> Result<T> {
+        match self {
+            Result::Ok((t, Ok(()))) => Ok(t),
+            Result::Ok((_, Err(e))) | Result::Err(e) => Err(e),
+        }
+    }
+
+    /// Collect Result into a Result, ignoring any errors
+    fn ignore_error(self) -> Result<T> {
+        match self {
+            Result::Ok((t, _)) => Ok(t),
+            Result::Err(e) => Err(e),
+        }
+    }
+
+    fn is_warn_ok(&self) -> bool {
+        match &self {
+            Result::Ok(..) => true,
+            _ => false,
+        }
+    }
+
+    fn is_warning_or_error(&self) -> bool {
+        match &self {
+            Result::Err(..) | Result::Ok((_, Err(_))) => true,
+            _ => false,
+        }
+    }
+
+    fn with_warning_context<C, F>(self, f: F) -> Result<(T, Warning), anyhow::Error>
+    where
+        C: std::fmt::Display + Send + Sync + 'static,
+        F: FnOnce() -> C {
+        let c = f();
+        match self {
+            Ok((t, w)) => match w {
+                Ok(()) => {Ok( (t, Ok(()) ) )},
+                Err(w) => {Ok((t, Context::with_context(Err(w), || c)))}
+            }
+            Err(e) => {Context::with_context(Err(e), || c)}
+        }
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -87,65 +146,61 @@ pub enum ResetValueError {
     MaskTooLarge(u64, u32),
 }
 
-pub(crate) fn check_name(name: &str, tag: &str) -> Result<()> {
+pub(crate) fn check_name(name: &str, tag: &str) -> StdResult<(), NameError> {
     static PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new("^[_A-Za-z0-9]*$").unwrap());
     if PATTERN.is_match(name) {
         Ok(())
     } else {
-        if cfg!(feature = "strict") {
-            Err(NameError::Invalid(name.to_string(), tag.to_string()).into())
-        } else {
-            Ok(())
-        }
+        Err(NameError::Invalid(name.to_string(), tag.to_string()))
     }
 }
 
-pub(crate) fn check_dimable_name(name: &str, tag: &str) -> Result<()> {
+pub(crate) fn check_dimable_name(name: &str, tag: &str) -> StdResult<(), NameError> {
     static PATTERN: Lazy<Regex> = Lazy::new(|| {
         Regex::new("^(((%s)|(%s)[_A-Za-z]{1}[_A-Za-z0-9]*)|([_A-Za-z]{1}[_A-Za-z0-9]*(\\[%s\\])?)|([_A-Za-z]{1}[_A-Za-z0-9]*(%s)?[_A-Za-z0-9]*))$").unwrap()
     });
     if PATTERN.is_match(name) {
         Ok(())
     } else {
-        Err(NameError::Invalid(name.to_string(), tag.to_string()).into())
+        Err(NameError::Invalid(name.to_string(), tag.to_string()))
     }
 }
 
-pub(crate) fn check_has_placeholder(name: &str, tag: &str) -> Result<()> {
+pub(crate) fn check_has_placeholder(name: &str, tag: &str) -> Result<(), NameError> {
     if name.contains("%s") {
         Ok(())
     } else {
-        Err(NameError::MissingPlaceholder(name.to_string(), tag.to_string()).into())
+        Err(NameError::MissingPlaceholder(
+            name.to_string(),
+            tag.to_string(),
+        ))
     }
 }
 
-pub(crate) fn check_derived_name(name: &str, tag: &str) -> Result<()> {
-    for x in name.split('.') {
-        check_dimable_name(x, tag)?
-    }
-    Ok(())
+pub(crate) fn check_derived_name(name: &str, tag: &str) -> StdResult<(), NameError> {
+    name.split(".").try_for_each(|x| check_dimable_name(x, tag))
 }
 
 pub(crate) fn check_reset_value(
     size: Option<u32>,
     value: Option<u64>,
     mask: Option<u64>,
-) -> Result<()> {
+) -> StdResult<(), ResetValueError> {
     const MAX_BITS: u32 = u64::MAX.count_ones();
 
     if let (Some(size), Some(value)) = (size, value) {
         if MAX_BITS - value.leading_zeros() > size {
-            return Err(ResetValueError::ValueTooLarge(value, size).into());
+            return Err(ResetValueError::ValueTooLarge(value, size));
         }
     }
     if let (Some(size), Some(mask)) = (size, mask) {
         if MAX_BITS - mask.leading_zeros() > size {
-            return Err(ResetValueError::MaskTooLarge(mask, size).into());
+            return Err(ResetValueError::MaskTooLarge(mask, size));
         }
     }
     if let (Some(value), Some(mask)) = (value, mask) {
         if value & mask != value {
-            return Err(ResetValueError::MaskConflict(value, mask).into());
+            return Err(ResetValueError::MaskConflict(value, mask));
         }
     }
 

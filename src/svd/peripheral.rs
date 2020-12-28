@@ -132,6 +132,9 @@ impl PeripheralBuilder {
         self
     }
     pub fn build(self) -> Result<Peripheral> {
+        self.build_unstrict().into_result()
+    }
+    pub fn build_unstrict(self) -> Result<(Peripheral, Warning)> {
         (Peripheral {
             name: self
                 .name
@@ -155,18 +158,18 @@ impl PeripheralBuilder {
 }
 
 impl Peripheral {
-    fn validate(self) -> Result<Self> {
+    fn validate(self) -> Result<(Self, Warning)> {
         // TODO
         check_dimable_name(&self.name, "name")?;
         if let Some(name) = self.derived_from.as_ref() {
             check_dimable_name(name, "derivedFrom")?;
         } else if let Some(registers) = self.registers.as_ref() {
             if registers.is_empty() {
-                #[cfg(feature = "strict")]
-                return Err(SVDError::EmptyRegisters)?;
+                
+                return Ok((self, Err(SVDError::EmptyRegisters.into())));
             }
         }
-        Ok(self)
+        Ok((self, Ok(())))
     }
 }
 
@@ -174,17 +177,21 @@ impl Parse for Peripheral {
     type Object = Self;
     type Error = anyhow::Error;
 
-    fn parse(tree: &Element) -> Result<Self> {
+    fn parse_unstrict(tree: &Element) -> Result<(Self::Object, std::result::Result<(), Self::Error>)> {
         if tree.name != "peripheral" {
             return Err(SVDError::NotExpectedTag(tree.clone(), "peripheral".to_string()).into());
         }
         let name = tree.get_child_text("name")?;
-        Self::_parse(tree, name.clone()).with_context(|| format!("In peripheral `{}`", name))
+        Self::_parse(tree, name.clone()).with_warning_context(|| format!("In peripheral `{}`", name))
+    }
+
+    fn parse(elem: &Element) -> Result<Self::Object> {
+        Self::parse_unstrict(elem).into_result()
     }
 }
 
 impl Peripheral {
-    fn _parse(tree: &Element, name: String) -> Result<Self> {
+    fn _parse(tree: &Element, name: String) -> Result<(Self, Warning)> {
         PeripheralBuilder::default()
             .name(name)
             .version(tree.get_child_text_opt("version")?)
@@ -217,7 +224,7 @@ impl Peripheral {
                 None
             })
             .derived_from(tree.attributes.get("derivedFrom").map(|s| s.to_owned()))
-            .build()
+            .build_unstrict()
     }
 }
 

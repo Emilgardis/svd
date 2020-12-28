@@ -84,7 +84,7 @@ impl ClusterInfoBuilder {
         self.children = Some(value);
         self
     }
-    pub fn build(self) -> Result<ClusterInfo> {
+    pub fn build(self) -> Result<(ClusterInfo, Warning)> {
         (ClusterInfo {
             name: self
                 .name
@@ -106,15 +106,14 @@ impl ClusterInfoBuilder {
 }
 
 impl ClusterInfo {
-    fn validate(self) -> Result<Self> {
+    fn validate(self) -> Result<(Self, Warning)> {
         check_dimable_name(&self.name, "name")?;
         if let Some(name) = self.derived_from.as_ref() {
             check_derived_name(name, "derivedFrom")?;
         } else if self.children.is_empty() {
-            #[cfg(feature = "strict")]
-            return Err(SVDError::EmptyCluster)?;
+            return Ok((self, Err(SVDError::EmptyCluster.into())));
         }
-        Ok(self)
+        Ok((self, Ok(())))
     }
 }
 
@@ -124,12 +123,20 @@ impl Parse for ClusterInfo {
 
     fn parse(tree: &Element) -> Result<Self> {
         let name = tree.get_child_text("name")?;
+        Self::_parse(tree, name.clone())
+            .with_context(|| format!("In cluster `{}`", name))
+            .into_result()
+    }
+    fn parse_unstrict(
+        tree: &Element,
+    ) -> Result<(Self::Object, std::result::Result<(), Self::Error>)> {
+        let name = tree.get_child_text("name")?;
         Self::_parse(tree, name.clone()).with_context(|| format!("In cluster `{}`", name))
     }
 }
 
 impl ClusterInfo {
-    fn _parse(tree: &Element, name: String) -> Result<Self> {
+    fn _parse(tree: &Element, name: String) -> Result<(Self, Warning)> {
         ClusterInfoBuilder::default()
             .name(name)
             .derived_from(tree.attributes.get("derivedFrom").map(|s| s.to_owned()))

@@ -110,6 +110,9 @@ impl DeviceBuilder {
         self
     }
     pub fn build(self) -> Result<Device> {
+        self.build_unstrict().into_result()
+    }
+    pub fn build_unstrict(self) -> Result<(Device, Warning)> {
         (Device {
             name: self
                 .name
@@ -131,12 +134,12 @@ impl DeviceBuilder {
 }
 
 impl Device {
-    fn validate(self) -> Result<Self> {
+    fn validate(self) -> Result<(Self, Warning)> {
         // TODO
         if self.peripherals.is_empty() {
             return Err(SVDError::EmptyDevice)?;
         }
-        Ok(self)
+        Ok((self, Ok(())))
     }
 }
 
@@ -145,17 +148,32 @@ impl Parse for Device {
     type Error = anyhow::Error;
 
     fn parse(tree: &Element) -> Result<Self> {
+        Self::parse_unstrict(tree).into_result()
+    }
+
+    fn parse_unstrict(tree: &Element) -> Result<(Self::Object, Result<(), Self::Error>)> {
         if tree.name != "device" {
             return Err(SVDError::NotExpectedTag(tree.clone(), "device".to_string()).into());
         }
         let name = tree.get_child_text("name")?;
-        Self::_parse(tree, name.clone()).with_context(|| format!("In device `{}`", name))
+        Self::_parse(tree, name.clone())
+            .with_context(|| format!("In device `{}`", name))
+            .map(|(d, w)| {
+                (d, {
+                    // FIXME: Every other warning is thrown away, seems wasteful.
+                    match w.into_iter().next() {
+                        Some(w) => w.with_context(|| format!("In device `{}`", name)),
+                        None => Ok(()),
+                    }
+                })
+            })
     }
 }
 
 impl Device {
     /// Parses a SVD file
-    fn _parse(tree: &Element, name: String) -> Result<Self> {
+    fn _parse(tree: &Element, name: String) -> Result<(Self, Vec<Warning>)> {
+        let mut warnings = vec![];
         DeviceBuilder::default()
             .name(name)
             .schema_version(tree.attributes.get("schemaVersion").cloned())
@@ -169,12 +187,26 @@ impl Device {
                     .get_child_elem("peripherals")?
                     .children
                     .par_iter()
-                    .map(Peripheral::parse)
+                    .map(Peripheral::parse_unstrict)
                     .collect();
-                ps?
+                ps?.into_iter()
+                    .map(|p| match p {
+                        (p, Ok(())) => p,
+                        (p, Err(w)) => {
+                            warnings.push(Err(w));
+                            p
+                        }
+                    })
+                    .collect()
             })
             .default_register_properties(RegisterProperties::parse(tree)?)
-            .build()
+            .build_unstrict()
+            .map(|(t, w)| {
+                (t, {
+                    warnings.push(w);
+                    warnings
+                })
+            })
     }
 }
 

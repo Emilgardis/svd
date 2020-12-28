@@ -154,6 +154,9 @@ impl RegisterInfoBuilder {
         self
     }
     pub fn build(self) -> Result<RegisterInfo> {
+        self.build_unstrict().into_result()
+    }
+    pub fn build_unstrict(self) -> Result<(RegisterInfo, Warning)> {
         (RegisterInfo {
             name: self
                 .name
@@ -179,7 +182,7 @@ impl RegisterInfoBuilder {
 }
 
 impl RegisterInfo {
-    fn validate(self) -> Result<Self> {
+    fn validate(self) -> Result<(Self, Warning)> {
         check_dimable_name(&self.name, "name")?;
         if let Some(name) = self.alternate_group.as_ref() {
             check_name(name, "alternateGroup")?;
@@ -191,11 +194,10 @@ impl RegisterInfo {
             check_derived_name(name, "derivedFrom")?;
         } else if let Some(fields) = self.fields.as_ref() {
             if fields.is_empty() {
-                #[cfg(feature = "strict")]
-                return Err(SVDError::EmptyFields)?;
+                return Ok((self, Err(SVDError::EmptyFields.into())));
             }
         }
-        Ok(self)
+        Ok((self, Ok(())))
     }
 }
 
@@ -204,13 +206,19 @@ impl Parse for RegisterInfo {
     type Error = anyhow::Error;
 
     fn parse(tree: &Element) -> Result<Self> {
+        Self::parse_unstrict(tree).into_result()
+    }
+
+    fn parse_unstrict(
+        tree: &Element,
+    ) -> Result<(Self::Object, Result<(), Self::Error>), Self::Error> {
         let name = tree.get_child_text("name")?;
-        Self::_parse(tree, name.clone()).with_context(|| format!("In register `{}`", name))
+        Self::_parse(tree, name.clone()).with_warning_context(|| format!("In register `{}`", name))
     }
 }
 
 impl RegisterInfo {
-    fn _parse(tree: &Element, name: String) -> Result<Self> {
+    fn _parse(tree: &Element, name: String) -> Result<(Self, Warning)> {
         RegisterInfoBuilder::default()
             .name(name)
             .alternate_group(tree.get_child_text_opt("alternateGroup")?)
@@ -239,7 +247,7 @@ impl RegisterInfo {
                 "modifiedWriteValues",
                 tree,
             )?)
-            .build()
+            .build_unstrict()
     }
 }
 
@@ -366,7 +374,8 @@ mod tests {
                         .unwrap(),
                 )]))
                 .modified_write_values(Some(ModifiedWriteValues::OneToToggle))
-                .build()
+                .build_unstrict()
+                .into_result()
                 .unwrap(),
             "
             <register derivedFrom=\"derived_from\">

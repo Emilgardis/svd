@@ -11,6 +11,15 @@ pub trait Parse {
     type Error;
     /// Parse an XML/SVD element into it's corresponding `Object`.
     fn parse(elem: &Element) -> Result<Self::Object, Self::Error>;
+    /// Parse an XML/SVD element into it's corresponding `Object` with an optional error.
+    fn parse_unstrict(
+        elem: &Element,
+    ) -> Result<(Self::Object, std::result::Result<(), Self::Error>), Self::Error> {
+        match Self::parse(elem) {
+            Ok(t) => Ok((t, Ok(()))),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// Parses an optional child element with the provided name and Parse function
